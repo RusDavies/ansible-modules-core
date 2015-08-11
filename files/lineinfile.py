@@ -23,6 +23,7 @@ import re
 import os
 import pipes
 import tempfile
+import fcntl
 
 DOCUMENTATION = """
 ---
@@ -118,6 +119,15 @@ options:
      description:
        - Create a backup file including the timestamp information so you can
          get the original file back if you somehow clobbered it incorrectly.
+  lock:
+     required: false
+     default: "no"
+     choices: [ "yes", "no" ]
+     description:
+       - Require a mutex lock on the destination file.  Useful when multiple 
+         forked processes act on the same file, as may happen when a task
+         is delegated to a central machine.
+
   others:
      description:
        - All arguments accepted by the M(file) module also work here.
@@ -182,7 +192,12 @@ def check_file_attrs(module, changed, message):
 
 def present(module, dest, regexp, line, insertafter, insertbefore, create,
             backup, backrefs):
-
+    
+    lock_file = None
+    if module.params['lock'] == True:
+        lock_file = open(dest + ".ansible_lock", 'w')
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+    
     if not os.path.exists(dest):
         if not create:
             module.fail_json(rc=257, msg='Destination %s does not exist !' % dest)
@@ -286,6 +301,12 @@ def present(module, dest, regexp, line, insertafter, insertbefore, create,
 
 def absent(module, dest, regexp, line, backup):
 
+    lock_file = None
+    if module.params['lock'] == True:
+        print "Locking the file"
+        lock_file = open(dest + ".ansible_lock", 'w')
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+
     if not os.path.exists(dest):
         module.exit_json(changed=False, msg="file not present")
 
@@ -335,6 +356,7 @@ def main():
             create=dict(default=False, type='bool'),
             backup=dict(default=False, type='bool'),
             validate=dict(default=None, type='str'),
+            lock=dict(default=False, type='bool'),
         ),
         mutually_exclusive=[['insertbefore', 'insertafter']],
         add_file_common_args=True,
